@@ -82,7 +82,7 @@ int not(char *p)
         n = *p - '0';
     else                        //variable
         n = getValue(*p);
-    return abs(n - 1);
+    return 1 - n;
 }
 int and(char *p)
 {
