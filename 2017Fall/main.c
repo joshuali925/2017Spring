@@ -50,8 +50,8 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
                 checkdir(npath, coltosort, outdir, fd);
                 exit(0);
             } else if (dirpid > 0) {    // parent, forked a child for dir
-                // printf("%d forked %d for dir:  %s\n", getpid(), dirpid, npath);
-                waitpid(dirpid, &dirstat, 0);
+                printf("%d forked %d for dir:  %s\n", getpid(), dirpid, npath);
+                // waitpid(dirpid, &dirstat, 0);
             } else
                 return -1;
             /* ================================================================== */
@@ -77,8 +77,8 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
                 processcsv(filename, coltosort, outname);
                 exit(0);
             } else if (filepid > 0) {   // parent, forked a child for csv
-                // printf("%d forked %d for file: %s\n", getpid(), filepid, filename);
-                waitpid(filepid, &filestat, 0);
+                printf("%d forked %d for file: %s\n", getpid(), filepid, filename);
+                // waitpid(filepid, &filestat, 0);
             } else
                 return -1;
         }
@@ -101,6 +101,11 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
             if (childpid > 0)
                 childpids[childnum++] = childpid;
         }
+    }
+    int i;
+
+    for (i = 0; i < childnum; i++) {
+        wait(NULL);
     }
     closedir(dp);
     return 0;
@@ -128,15 +133,13 @@ int main(int argc, char **argv)
     char pipebuffer[300] = "";
 
     read(fd[0], pipebuffer, sizeof(pipebuffer));
-
-    for (i = 0; i < childnum - 1; i++)
-        printf("%d,", childpids[i]);
-    countchild = i + 1;
     for (i = 0; i < strlen(pipebuffer); i++)
         if (pipebuffer[i] == ',')
             countchild++;
-    printf
-        ("Initial PID: %d\nPIDS of all child processes: %d%s\nTotal number of processes: %d\n",
-         initpid, childpids[i], pipebuffer + 1, countchild);
+    printf("Initial PID: %d\nPIDS of all child processes: ", initpid);
+    for (i = 0; i < childnum; i++)
+        printf("%d,", childpids[i]);
+    countchild += i;
+    printf("%s\nTotal number of processes: %d\n", pipebuffer + 2, countchild);
     return 0;
 }
