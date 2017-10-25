@@ -9,7 +9,7 @@
 gcc -g main.c -o main && ./main
 */
 int initpid, childnum = 0;
-pid_t childpids[300];
+pid_t childpids[300];           // stores children level = 1
 void appenddir(char *npath, char *path, char *path2)    // npath = path + path2
 {
     if (strcmp(path, ".") != 0) {
@@ -20,7 +20,7 @@ void appenddir(char *npath, char *path, char *path2)    // npath = path + path2
         strcpy(npath, path2);
 }
 
-pid_t getvalidpid(pid_t dirpid, pid_t filepid)  // return the valid one
+pid_t getvalidpid(pid_t dirpid, pid_t filepid)  // return the valid one else -1
 {
     if (dirpid > 0)
         return dirpid;
@@ -36,11 +36,13 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
     dp = opendir(path);
     if (dp == NULL)
         return -1;
+    /* ================================================================== */
     while (entry = readdir(dp)) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
         pid_t dirpid = -1, filepid = -1;
-        int dirstat = 0, filestat = 0;
+
+        // int dirstat = 0, filestat = 0;
         char npath[300], filename[500];
 
         if (entry->d_type == DT_DIR) {  // if is directory
@@ -60,15 +62,15 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
             if (strlen(filename) < 4
                 || strcmp(filename + strlen(filename) - 4, ".csv") != 0
                 || strstr(filename, "-sorted-"))
-                continue;
+                continue;       // skip if sorted or not csv
             filepid = fork();
             if (filepid == 0) { // child, sort csv
                 char outname[500];
-                int namestart = 0, i = 0;
+                int namestart = 0, offset = 0;
 
-                while (*(filename + i)) // get where filename starts a/b/c.csv
-                    if (*(filename + i++) == '/')
-                        namestart = i;
+                while (*(filename + offset))    // get where filename starts
+                    if (*(filename + offset++) == '/')
+                        namestart = offset;
                 appenddir(outname, outdir, filename + namestart);
                 *(outname + strlen(outname) - 4) = '\0';        // no extension
                 strcat(outname, "-sorted-");
@@ -83,10 +85,10 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
                 return -1;
         }
         /* ================================================================== */
-        if (getpid() != initpid) {      // not initial process, pass up metadata
+        if (getpid() != initpid) {      // not initial process, add childpid to pipe
             pid_t childpid = getvalidpid(dirpid, filepid);
 
-            if (childpid < 0)   // has no children
+            if (childpid < 0)   // skip if did not fork any children
                 continue;
             char pipebuffer[300] = "", childstr[50];
 
@@ -95,17 +97,18 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
             strcat(pipebuffer, childstr);
             write(fd[1], pipebuffer, sizeof(pipebuffer));
             // printf("sent = |%s|\n", pipebuffer);
-        } else {                // initial process, record metadata
+        } else {                // initial process, record children level = 2
             pid_t childpid = getvalidpid(dirpid, filepid);
 
-            if (childpid > 0)
+            if (childpid > 0)   // if forked any children
                 childpids[childnum++] = childpid;
         }
     }
-    int i;
+    /* ================================================================== */
+    pid_t waitfor = -1;
 
-    for (i = 0; i < childnum; i++) {
-        wait(NULL);
+    while ((waitfor = wait(NULL)) > 0) {        // exit when -1 all children done
+        printf("waiting for %d\n", waitfor);
     }
     closedir(dp);
     return 0;
@@ -127,19 +130,20 @@ int main(int argc, char **argv)
             strcpy(outdir, argv[c + 1]);
         c++;
     }
+    /* ================================================================== */
     pipe(fd);
-    write(fd[1], "0", 2);
+    write(fd[1], "0", 2);       // have something in pipe, need to skip it later
     checkdir(path, coltosort, outdir, fd);
-    char pipebuffer[300] = "";
+    char pipebuffer[300] = "";  // pids of children level > 2
 
     read(fd[0], pipebuffer, sizeof(pipebuffer));
-    for (i = 0; i < strlen(pipebuffer); i++)
+    for (i = 0; i < strlen(pipebuffer); i++)    // count # children level > 2
         if (pipebuffer[i] == ',')
             countchild++;
     printf("Initial PID: %d\nPIDS of all child processes: ", initpid);
     for (i = 0; i < childnum; i++)
-        printf("%d,", childpids[i]);
-    countchild += i;
+        printf("%d,", childpids[i]);    // print out children level = 2
+    countchild += i;            // sum up number of children
     printf("%s\nTotal number of processes: %d\n", pipebuffer + 2, countchild);
     return 0;
 }
