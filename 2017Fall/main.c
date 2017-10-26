@@ -9,7 +9,7 @@
 gcc -g main.c -o main && ./main
 */
 int initpid, childnum = 0;
-pid_t childpids[300];           // stores children level = 1
+pid_t childpids[300];           // stores children level = 2
 void appenddir(char *npath, char *path, char *path2)    // npath = path + path2
 {
     if (strcmp(path, ".") != 0) {
@@ -71,7 +71,10 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
                 while (*(filename + offset))    // get where filename starts
                     if (*(filename + offset++) == '/')
                         namestart = offset;
-                appenddir(outname, outdir, filename + namestart);
+                if (strcmp(outdir, "default") == 0)
+                    strcpy(outname, filename);
+                else
+                    appenddir(outname, outdir, filename + namestart);
                 *(outname + strlen(outname) - 4) = '\0';        // no extension
                 strcat(outname, "-sorted-");
                 strcat(outname, coltosort);
@@ -105,17 +108,17 @@ int checkdir(char *path, char *coltosort, char *outdir, int *fd)
         }
     }
     /* ================================================================== */
-    pid_t waitfor = -1;
+    pid_t waitfor;
 
     while ((waitfor = wait(NULL)) > 0) {        // exit when -1 all children done
-        printf("waiting for %d\n", waitfor);
+        // printf("waiting for %d\n", waitfor);
     }
     closedir(dp);
     return 0;
 }
 int main(int argc, char **argv)
 {
-    char path[500] = ".", outdir[500] = ".", coltosort[500] = "duration";
+    char path[500] = ".", outdir[500] = "default", coltosort[500] = "duration";
     int c = 1, i, fd[2], countchild = 0;
 
     initpid = getpid();
@@ -140,7 +143,8 @@ int main(int argc, char **argv)
     for (i = 0; i < strlen(pipebuffer); i++)    // count # children level > 2
         if (pipebuffer[i] == ',')
             countchild++;
-    printf("Initial PID: %d\nPIDS of all child processes: ", initpid);
+    printf("Initial PID: %d\n", initpid);
+    printf("PIDS of all child processes: ");
     for (i = 0; i < childnum; i++)
         printf("%d,", childpids[i]);    // print out children level = 2
     countchild += i;            // sum up number of children
