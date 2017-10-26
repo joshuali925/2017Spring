@@ -1,184 +1,153 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <string.h>
+#include <wait.h>
+#include "processcsv.c"
 /*
-gcc sorter.c -o sorter && valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./sorter -c duration < m.csv
-gcc sorter.c -o sorter && ./sorter -c duration < m.csv
+gcc -g -o sorter sorter.c && ./sorter
 */
-#include "sorter.h"
-int collen = 0, linelen = 0, maxlen = 6000;
-char ***table, **column;
-char isnum(char *s)
+int initpid, childnum = 0;
+pid_t childpids[300];           // stores children level = 2
+void appenddir(char *npath, char *path, char *path2)    // npath = path + path2
 {
-    if (strlen(s) == 0)
-        return 's';
-    int i;
-
-    if ((s[0] >= '0' && s[0] <= '9') || s[0] == '-' || s[0] == '.') {
-        for (i = 1; i < strlen(s); i++)
-            if ((s[i] < '0' || s[i] > '9') && s[i] != '.')
-                return 's';
+    if (strcmp(path, ".") != 0) {
+        strcpy(npath, path);
+        strcat(npath, "/");
+        strcat(npath, path2);
     } else
-        return 's';
-    return 'n';
+        strcpy(npath, path2);
 }
 
-void readdata(FILE * fp)
+pid_t getvalidpid(pid_t dirpid, pid_t filepid)  // return the valid one else -1
 {
-    table = (char ***)malloc(sizeof(char **) * maxlen);
-    char c, *buffer = (char *)malloc(sizeof(char) * 10000);
-    int i, lineindex = 0, colindex = 0, lastletterindex;
-
-    do {
-        table[lineindex] = (char **)malloc(sizeof(char *) * collen);
-        colindex = 0;
-        do {                    // read a line
-            i = 0;
-            c = getc(fp);
-            /* ================================================================== */
-            if (c == '"') {     // process double quotes
-                do {
-                    c = getc(fp);
-                    buffer[i++] = c;
-                } while (c != '"');
-                buffer[i - 1] = '\0';
-            }
-            /* ================================================================== */
-            while (c == ' ')    // process trailing space
-                c = getc(fp);
-            lastletterindex = -1;
-            while (c != ',' && c != '\n' && c != EOF) { // read a column
-                if (c != ' ')
-                    lastletterindex = i;
-                buffer[i++] = c;
-                c = getc(fp);
-            }
-            buffer[lastletterindex + 1] = '\0';
-            /* ================================================================== */
-            table[lineindex][colindex] =
-                (char *)malloc(sizeof(char) * strlen(buffer) + 1);
-            strcpy(table[lineindex][colindex], buffer);
-            colindex++;
-        } while (c != '\n' && c != EOF);
-        if (lineindex == maxlen - 1) {  // need to allocate more space
-            maxlen += maxlen;
-            table = (char ***)realloc(table, maxlen * sizeof(char **));
-        }
-        lineindex++;
-    } while (c != EOF);
-    linelen = lineindex - 1;
-    free(table[linelen][0]);    // free column 0 in extra line
-    free(table[linelen]);       // free extra line
-    free(buffer);
+    if (dirpid > 0)
+        return dirpid;
+    if (filepid > 0)
+        return filepid;
+    return -1;
 }
-int searchcol(char *coltosort)
+int checkdir(char *path, char *coltosort, char *outdir, int *fd)
 {
-    int i;
+    struct dirent *entry;
+    DIR *dp;
 
-    for (i = 0; i < collen; i++)
-        if (strcmp(column[i], coltosort) == 0)
-            return i;
-    if (strlen(coltosort) + 2 == strlen(column[collen - 1]))    // check last column
-        for (i = 0; i < strlen(coltosort); i++)
-            if (coltosort[i] != column[collen - 1][i])
+    dp = opendir(path);
+    if (dp == NULL)
+        return -1;
+    /* ================================================================== */
+    while (entry = readdir(dp)) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        pid_t dirpid = -1, filepid = -1;
+
+        // int dirstat = 0, filestat = 0;
+        char npath[300], filename[500];
+
+        if (entry->d_type == DT_DIR) {  // if is directory
+            appenddir(npath, path, entry->d_name);
+            dirpid = fork();
+            if (dirpid == 0) {  // child, check new path
+                checkdir(npath, coltosort, outdir, fd);
+                exit(0);
+            } else if (dirpid > 0) {    // parent, forked a child for dir
+                // printf("%d forked %d for dir:  %s\n", getpid(), dirpid, npath);
+                // waitpid(dirpid, &dirstat, 0);
+            } else
                 return -1;
-    return collen - 1;
+            /* ================================================================== */
+        } else {                // if is file
+            appenddir(filename, path, entry->d_name);
+            if (strlen(filename) < 4
+                || strcmp(filename + strlen(filename) - 4, ".csv") != 0
+                || strstr(filename, "-sorted-"))
+                continue;       // skip if sorted or not csv
+            filepid = fork();
+            if (filepid == 0) { // child, sort csv
+                char outname[500];
+                int namestart = 0, offset = 0;
+
+                while (*(filename + offset))    // get where filename starts
+                    if (*(filename + offset++) == '/')
+                        namestart = offset;
+                if (strcmp(outdir, "default") == 0)
+                    strcpy(outname, filename);
+                else
+                    appenddir(outname, outdir, filename + namestart);
+                *(outname + strlen(outname) - 4) = '\0';        // no extension
+                strcat(outname, "-sorted-");
+                strcat(outname, coltosort);
+                strcat(outname, ".csv");
+                processcsv(filename, coltosort, outname);
+                exit(0);
+            } else if (filepid > 0) {   // parent, forked a child for csv
+                // printf("%d forked %d for file: %s\n", getpid(), filepid, filename);
+                // waitpid(filepid, &filestat, 0);
+            } else
+                return -1;
+        }
+        /* ================================================================== */
+        if (getpid() != initpid) {      // not initial process, add childpid to pipe
+            pid_t childpid = getvalidpid(dirpid, filepid);
+
+            if (childpid < 0)   // skip if did not fork any children
+                continue;
+            char pipebuffer[300] = "", childstr[50];
+
+            read(fd[0], pipebuffer, sizeof(pipebuffer));
+            sprintf(childstr, ",%d", childpid);
+            strcat(pipebuffer, childstr);
+            write(fd[1], pipebuffer, sizeof(pipebuffer));
+            // printf("sent = |%s|\n", pipebuffer);
+        } else {                // initial process, record children level = 2
+            pid_t childpid = getvalidpid(dirpid, filepid);
+
+            if (childpid > 0)   // if forked any children
+                childpids[childnum++] = childpid;
+        }
+    }
+    /* ================================================================== */
+    pid_t waitfor;
+
+    while ((waitfor = wait(NULL)) > 0) {        // exit when -1 all children done
+        // printf("waiting for %d\n", waitfor);
+    }
+    closedir(dp);
+    return 0;
 }
-int processcsv(char *filename, char *coltosortstr, char *outname)
+int main(int argc, char **argv)
 {
-    // tokenize *coltosortstr into **coltosort
-    int i, t, numcoltosort = 0;
-    char *token, *line = (char *)malloc(sizeof(char) * 50000), coltosort[28][50];
+    char path[500] = ".", outdir[500] = "default", coltosort[500] = "duration";
+    int c = 1, i, fd[2], countchild = 0;
 
-    token = strtok(coltosortstr, ",");
-    while (token != NULL) {
-        strcpy(coltosort[numcoltosort], token);
-        numcoltosort++;
-        token = strtok(NULL, ",");
+    initpid = getpid();
+    // if (argc < 3)
+    // return 0;
+    while (c < argc - 1) {
+        if (*(argv[c] + 1) == 'c')
+            strcpy(coltosort, argv[c + 1]);
+        else if (*(argv[c] + 1) == 'd')
+            strcpy(path, argv[c + 1]);
+        else if (*(argv[c] + 1) == 'o')
+            strcpy(outdir, argv[c + 1]);
+        c++;
     }
     /* ================================================================== */
-    // read column titles and data
-    FILE *fp = fopen(filename, "r");
-    column = (char **)malloc(sizeof(char *) * maxlen);
-    fgets(line, 50000, fp);
-    token = strtok(line, ",");
-    while (token != NULL) {
-        column[collen] = (char *)malloc(sizeof(char) * strlen(token) + 1);
-        if (collen == maxlen - 1) {     // need to allocate more space
-            maxlen += maxlen;
-            column = (char **)realloc(column, maxlen * sizeof(char *));
-        }
-        strcpy(column[collen++], token);
-        token = strtok(NULL, ",");
-    }
-    free(line);
-    if (collen != 28) {         // if not valid csv
-        for (i = 0; i < collen; i++)
-            free(column[i]);
-        free(column);
-        fclose(fp);
-        return 0;
-    }
-    readdata(fp);
-    int tosort[numcoltosort];
-    char coltype[numcoltosort]; // coltype: s for string, n for numbers
+    pipe(fd);
+    write(fd[1], "0", 2);       // have something in pipe, need to skip it later
+    checkdir(path, coltosort, outdir, fd);
+    char pipebuffer[300] = "";  // pids of children level > 2
 
-    for (i = 0; i < numcoltosort; i++) {        // there are numcoltosort levels
-        tosort[i] = searchcol(coltosort[i]);
-        if (tosort[i] == -1)
-            return -1;
-        coltype[i] = isnum(table[0][tosort[i]]);
-    }
-    mergesort(table, 0, linelen - 1, coltype, tosort, numcoltosort);
-    /* ================================================================== */
-    FILE *outdir = fopen(outname, "w");
-
-    for (i = 0; i < collen - 1; i++) {
-        fprintf(outdir, "%s,", column[i]);
-        free(column[i]);
-    }
-    fprintf(outdir, "%s", column[i]);
-    free(column[i]);
-    free(column);
-    fclose(fp);
-    for (i = 0; i < linelen; i++) {
-        for (t = 0; t < collen - 1; t++) {
-            if (strchr(table[i][t], ','))
-                fprintf(outdir, "\"%s\",", table[i][t]);
-            else
-                fprintf(outdir, "%s,", table[i][t]);
-            free(table[i][t]);
-        }
-        if (strchr(table[i][t], ','))
-            fprintf(outdir, "\"%s\"\n", table[i][t]);
-        else
-            fprintf(outdir, "%s\n", table[i][t]);
-        free(table[i][t]);
-        free(table[i]);
-    }
-    free(table);
-    fclose(outdir);
-    /* ====================out put to file/stdin========================= */
-    // for (i = 0; i < collen - 1; i++) {
-    // printf("%s,", column[i]);
-    // free(column[i]);
-    // }
-    // printf("%s", column[i]);
-    // free(column[i]);
-    // free(column);
-    // fclose(fp);
-    // for (i = 0; i < linelen; i++) {
-    // for (t = 0; t < collen - 1; t++) {
-    // if (strchr(table[i][t], ','))
-    // printf("\"%s\",", table[i][t]);
-    // else
-    // printf("%s,", table[i][t]);
-    // free(table[i][t]);
-    // }
-    // if (strchr(table[i][t], ','))
-    // printf("\"%s\"\n", table[i][t]);
-    // else
-    // printf("%s\n", table[i][t]);
-    // free(table[i][t]);
-    // free(table[i]);
-    // }
-    // free(table);
+    read(fd[0], pipebuffer, sizeof(pipebuffer));
+    for (i = 0; i < strlen(pipebuffer); i++)    // count # children level > 2
+        if (pipebuffer[i] == ',')
+            countchild++;
+    printf("Initial PID: %d\n", initpid);
+    printf("PIDS of all child processes: ");
+    for (i = 0; i < childnum; i++)
+        printf("%d,", childpids[i]);    // print out children level = 2
+    countchild += i;            // sum up number of children
+    printf("%s\nTotal number of processes: %d\n", pipebuffer + 2, countchild);
     return 0;
 }
