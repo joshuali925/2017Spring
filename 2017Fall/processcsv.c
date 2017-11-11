@@ -24,34 +24,31 @@ void readdata(FILE * fp)
 {
     table = (char ***)malloc(sizeof(char **) * maxlen);
     char c, *buffer = (char *)malloc(sizeof(char) * 10000);
-    char *line = (char *)malloc(sizeof(char) * 50000);
-    int bufferindex, charindex, lineindex = 0, colindex = 0;
+    int i, lineindex = 0, colindex = 0, lastletterindex;
 
-    while (fgets(line, 50000, fp)) {    // one loop reads a line
+    do {
         table[lineindex] = (char **)malloc(sizeof(char *) * collen);
         colindex = 0;
-        charindex = 0;
-        do {                    // one loop reads a column
-            bufferindex = 0;
-            c = line[charindex++];
+        do {                    // read a line
+            i = 0;
+            c = getc(fp);
             /* ================================================================== */
             if (c == '"') {     // process double quotes
                 do {
-                    c = line[charindex++];
-                    buffer[bufferindex++] = c;
+                    c = getc(fp);
+                    buffer[i++] = c;
                 } while (c != '"');
-                buffer[bufferindex - 1] = '\0';
+                buffer[i - 1] = '\0';
             }
             /* ================================================================== */
             while (c == ' ')    // process trailing space
-                c = line[charindex++];
-            int lastletterindex = -1;
-
-            while (charindex < strlen(line) && c != ',' && c != '\n' && c != EOF) {     // reading column
+                c = getc(fp);
+            lastletterindex = -1;
+            while (c != ',' && c != '\n' && c != EOF) { // read a column
                 if (c != ' ')
-                    lastletterindex = bufferindex;
-                buffer[bufferindex++] = c;
-                c = line[charindex++];
+                    lastletterindex = i;
+                buffer[i++] = c;
+                c = getc(fp);
             }
             buffer[lastletterindex + 1] = '\0';
             /* ================================================================== */
@@ -59,17 +56,16 @@ void readdata(FILE * fp)
                 (char *)malloc(sizeof(char) * strlen(buffer) + 1);
             strcpy(table[lineindex][colindex], buffer);
             colindex++;
-        } while (c != '\n' && c != '\r');
+        } while (c != '\n' && c != EOF);
         if (lineindex == maxlen - 1) {  // need to allocate more space
             maxlen += maxlen;
             table = (char ***)realloc(table, maxlen * sizeof(char **));
         }
         lineindex++;
-    }
+    } while (c != EOF);
     linelen = lineindex - 1;
     free(table[linelen][0]);    // free column 0 in extra line
     free(table[linelen]);       // free extra line
-    free(line);
     free(buffer);
 }
 int searchcol(char *coltosort)
@@ -130,7 +126,7 @@ int processcsv(char *filename, char *coltosortstr, char *outname)
             return -1;
         coltype[i] = isnum(table[0][tosort[i]]);
     }
-    mergesort(table, 0, linelen - 1, coltype, tosort, numcoltosort);
+    // mergesort(table, 0, linelen - 1, coltype, tosort, numcoltosort);
     /* ================================================================== */
     FILE *outdir = fopen(outname, "w");
 
@@ -192,6 +188,6 @@ int processcsv(char *filename, char *coltosortstr, char *outname)
 // int main()
 // {
     // char coltosortstr[] = "duration";
-    // processcsv("small.csv", coltosortstr, "o");
+    // processcsv("m.csv", coltosortstr, "o");
     // return 0;
 // }
