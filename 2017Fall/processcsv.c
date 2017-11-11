@@ -126,7 +126,7 @@ int processcsv(char *filename, char *coltosortstr, char *outname)
             return -1;
         coltype[i] = isnum(table[0][tosort[i]]);
     }
-    // mergesort(table, 0, linelen - 1, coltype, tosort, numcoltosort);
+    mergesort(table, 0, linelen - 1, coltype, tosort, numcoltosort);
     /* ================================================================== */
     FILE *outdir = fopen(outname, "w");
 
