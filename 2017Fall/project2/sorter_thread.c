@@ -102,7 +102,7 @@ void *processcsv(void *oripath)
 int main(int argc, char **argv)
 {
     strcpy(coltosort, "director_name");
-    char path[500] = ".";
+    char path[500] = ".", outpath[500] = ".";
     int c = 1, i, t;
 
     // signal(SIGSEGV, sig_handler);
@@ -115,11 +115,11 @@ int main(int argc, char **argv)
         else if (*(argv[c] + 1) == 'd')
             strcpy(path, argv[c + 1]);
         else if (*(argv[c] + 1) == 'o')
-            strcpy(outname, argv[c + 1]);
+            strcpy(outpath, argv[c + 1]);
         c += 2;
     }
     getcolinfo();
-    sprintf(outname, "AllFiles-sorted-%s.csv", coltosort);
+    sprintf(outname, "%s/AllFiles-sorted-%s.csv", outpath, coltosort);
     /* ================================================================== */
     struct timeval t0, t1;
     long msec;
