@@ -1,7 +1,9 @@
 #include "processcsv.h"
-#include <time.h>
+#include <sys/time.h>
+#include <signal.h>
+#include <errno.h>
 /*
-for i in {000..1024}; do cp m.csv m--$i.csv; done
+for i in {0000..1024}; do cp m.csv m--$i.csv; done
 gcc -g -o sorter_thread sorter_thread.c -pthread && ./sorter_thread
 gcc sorter_thread.c -o sorter_thread -pthread && valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./sorter_thread
 */
@@ -13,15 +15,20 @@ pthread_t tid[100000];
 char ****alldata, *column, coltosort[50], outname[500], coltype;
 int tosort, linelen[10000], collen = 28;
 int filecounter = 0;
-char paths[100][3000];
+char paths[100][300];
 int pathcounter = 0;
+void sig_handler(int signo)
+{
+    if (signo == SIGSEGV)
+        printf("%s\n", __func__);
+}
 void *traversedir(void *oripath)
 {
     char *path = oripath;
     DIR *dp = opendir(path);
     pthread_t currtid;
-    pthread_t waittid[3000];
-    int countthread = 0, i, localcounter = 0;
+    pthread_t waittid[10000];
+    int countthread = 0, i, localcounter = 0, chunk = 1 << 9, joined = 0;
     struct dirent *entry;
 
     if (dp == NULL)
@@ -34,34 +41,49 @@ void *traversedir(void *oripath)
         pathcounter++;
         pthread_mutex_unlock(&pathlock);
         sprintf(paths[localcounter], "%s/%s", path, entry->d_name);
+        // printf("%s\n",entry->d_name);
         if (entry->d_type == DT_DIR) {
             pthread_create(&currtid, NULL, (void *)&traversedir,
                            (void *)&paths[localcounter]);
         } else {
             if (strlen(paths[localcounter]) < 4
                 || strcmp(paths[localcounter] + strlen(paths[localcounter]) - 4,
-                          ".csv") != 0 || strstr(paths[localcounter], "-sorted-"))
+                          ".csv") != 0
+                || strstr(paths[localcounter], "-sorted-"))
                 continue;
             pthread_create(&currtid, NULL, (void *)&processcsv,
                            (void *)&paths[localcounter]);
         }
         waittid[countthread++] = currtid;
-        // pthread_join(currtid, NULL);
         pthread_mutex_lock(&threadlock);
         tid[tidindex++] = currtid;
         pthread_mutex_unlock(&threadlock);
+        // pthread_join(currtid, NULL);
+        if (countthread == chunk) {
+            for (i = joined; i < countthread; i++) {
+                pthread_join(waittid[i], NULL);
+            }
+            joined = countthread;
+            chunk <<= 1;
+            // printf("%d\n", joined);
+        }
     }
-    for (i = 0; i < countthread; i++) {
+    for (i = joined; i < countthread; i++) {
         pthread_join(waittid[i], NULL);
     }
     closedir(dp);
 }
 void *processcsv(void *oripath)
 {
-    char *filename = oripath, *line = (char *)malloc(sizeof(char) * 5000), ***table;
+    char *filename = oripath, *line =
+        (char *)malloc(sizeof(char) * 5000), ***table;
     int i, t;
     FILE *fp = fopen(filename, "r");
 
+    if (fp == NULL) {
+        printf("filed to open %s: %s\n", filename, strerror(errno));
+        return NULL;
+    }
     fgets(line, 5000, fp);
     if (filecounter == 0) {
         column = line;
@@ -74,9 +96,9 @@ void *processcsv(void *oripath)
 
     pthread_mutex_unlock(&datalock);
     table = readdata(fp, localcounter);
+    fclose(fp);
     mergesort(table, 0, linelen[localcounter] - 1, coltype, tosort);
     alldata[localcounter] = table;
-    fclose(fp);
     return NULL;
 }
 int main(int argc, char **argv)
@@ -84,9 +106,11 @@ int main(int argc, char **argv)
     strcpy(coltosort, "director_name");
     char path[500] = ".";
     int c = 1, i, t;
-    alldata = (char ****)malloc(sizeof(char ***) * 5000);
-    // if (argc < 3)
-    // return 0;
+
+    // signal(SIGSEGV, sig_handler);
+    alldata = (char ****)malloc(sizeof(char ***) * 10000);
+    if (argc < 3)
+        return 0;
     while (c < argc - 1) {
         if (*(argv[c] + 1) == 'c')
             strcpy(coltosort, argv[c + 1]);
@@ -99,26 +123,26 @@ int main(int argc, char **argv)
     getcolinfo();
     sprintf(outname, "AllFiles-sorted-%s.csv", coltosort);
     /* ================================================================== */
-    clock_t start, diff;
-    int msec;
+    struct timeval t0, t1;
+    long msec;
 
-    start = clock();
+    // gettimeofday(&t0, 0);
     traversedir(path);
-    diff = clock() - start;
-    msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("\nread/sort used %d.%d sec\n", msec / 1000, msec % 1000);
-    start = clock();
+    // gettimeofday(&t1, 0);
+    // msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
+    // printf("\nread/sort used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
+    // gettimeofday(&t0, 0);
     kwaymerge();
-    diff = clock() - start;
-    msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("merging used %d.%d sec\n", msec / 1000, msec % 1000);
-    start = clock();
+    // gettimeofday(&t1, 0);
+    // msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
+    // printf("merging used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
+    // gettimeofday(&t0, 0);
     outputfile();
-    diff = clock() - start;
-    msec = diff * 1000 / CLOCKS_PER_SEC;
-    printf("output used %d.%d sec\n", msec / 1000, msec % 1000);
-    printf("total # lines = %d\n", linelen[0]);
-    printf("total # files = %d\n\n\n", filecounter);
+    // gettimeofday(&t1, 0);
+    // msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
+    // printf("output used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
+    // printf("total \t\t%d lines\n", linelen[0]);
+    // printf("total \t\t%d files\n\n\n", filecounter);
     /* ================================================================== */
     pthread_mutex_destroy(&threadlock);
     pthread_mutex_destroy(&datalock);
@@ -137,7 +161,6 @@ int main(int argc, char **argv)
 void *twowaymerge(void *context)
 {
     int *file = context, file1 = file[0], file2 = file[1];
-
     int totallen = linelen[file1] + linelen[file2], i = 0, j = 0, k = 0;
     char ***newfile = (char ***)malloc(sizeof(char **) * totallen);
     double comp;
@@ -146,7 +169,9 @@ void *twowaymerge(void *context)
         if (coltype == 's')
             comp = strcmp(alldata[file1][i][tosort], alldata[file2][j][tosort]);
         else
-            comp = atof(alldata[file1][i][tosort]) - atof(alldata[file2][j][tosort]);
+            comp =
+                atof(alldata[file1][i][tosort]) -
+                atof(alldata[file2][j][tosort]);
         if (comp <= 0)
             newfile[k++] = alldata[file1][i++];
         else
@@ -172,9 +197,9 @@ void kwaymerge()
 
     while (skip < filecounter) {
         for (i = 0; i < filecounter - skip; i += skip * 2) {
-            // twowaymerge(&context);
             context[countthread][0] = i;
             context[countthread][1] = i + skip;
+            // twowaymerge(&context);
             pthread_create(&currtid, NULL, (void *)&twowaymerge,
                            (void *)&context[countthread]);
             waittid[countthread++] = currtid;
@@ -238,10 +263,11 @@ char ***readdata(FILE * fp, int localcounter)
     free(buffer);
     return table;
 }
+
 void outputfile()
 {
     FILE *outdir = fopen(outname, "w");
-    int i, t;
+    int i, t, counter = 1;
 
     fprintf(outdir, "%s", column);
     free(column);
@@ -259,6 +285,10 @@ void outputfile()
             fprintf(outdir, "%s\n", alldata[0][i][t]);
         free(alldata[0][i][t]);
         free(alldata[0][i]);
+        // if (i & counter) {
+        // printf("outputted line %d\n", i);
+        // counter <<= 1;
+        // }
     }
     free(alldata[0]);
     free(alldata);
