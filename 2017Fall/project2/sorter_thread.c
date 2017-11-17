@@ -28,7 +28,7 @@ void *traversedir(void *oripath)
     DIR *dp = opendir(path);
     pthread_t currtid;
     pthread_t waittid[10000];
-    int countthread = 0, i, localcounter = 0, chunk = 1 << 9, joined = 0;
+    int countthread = 0, i, localcounter = 0, chunk = 512, joined = 0;
     struct dirent *entry;
 
     if (dp == NULL)
@@ -48,8 +48,7 @@ void *traversedir(void *oripath)
         } else {
             if (strlen(paths[localcounter]) < 4
                 || strcmp(paths[localcounter] + strlen(paths[localcounter]) - 4,
-                          ".csv") != 0
-                || strstr(paths[localcounter], "-sorted-"))
+                          ".csv") != 0 || strstr(paths[localcounter], "-sorted-"))
                 continue;
             pthread_create(&currtid, NULL, (void *)&processcsv,
                            (void *)&paths[localcounter]);
@@ -64,8 +63,7 @@ void *traversedir(void *oripath)
                 pthread_join(waittid[i], NULL);
             }
             joined = countthread;
-            chunk <<= 1;
-            // printf("%d\n", joined);
+            chunk += 512;
         }
     }
     for (i = joined; i < countthread; i++) {
@@ -75,8 +73,7 @@ void *traversedir(void *oripath)
 }
 void *processcsv(void *oripath)
 {
-    char *filename = oripath, *line =
-        (char *)malloc(sizeof(char) * 5000), ***table;
+    char *filename = oripath, *line = (char *)malloc(sizeof(char) * 5000), ***table;
     int i, t;
     FILE *fp = fopen(filename, "r");
 
@@ -169,9 +166,7 @@ void *twowaymerge(void *context)
         if (coltype == 's')
             comp = strcmp(alldata[file1][i][tosort], alldata[file2][j][tosort]);
         else
-            comp =
-                atof(alldata[file1][i][tosort]) -
-                atof(alldata[file2][j][tosort]);
+            comp = atof(alldata[file1][i][tosort]) - atof(alldata[file2][j][tosort]);
         if (comp <= 0)
             newfile[k++] = alldata[file1][i++];
         else
