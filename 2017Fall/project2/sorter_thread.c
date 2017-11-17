@@ -31,8 +31,10 @@ void *traversedir(void *oripath)
     int countthread = 0, i, localcounter = 0, chunk = 512, joined = 0;
     struct dirent *entry;
 
-    if (dp == NULL)
+    if (dp == NULL) {
+        printf("failed to read dir %s: %s\n", path, strerror(errno));
         return NULL;
+    }
     while (entry = readdir(dp)) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
