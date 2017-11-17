@@ -188,25 +188,26 @@ void kwaymerge()
 {
     int skip = 1, i, countthread = 0;
     pthread_t currtid;
-    pthread_t waittid[3000];
-    int context[3000][2];
+    // pthread_t waittid[3000];
+    // int context[3000][2];
+    int context[1][2];
 
     while (skip < filecounter) {
         for (i = 0; i < filecounter - skip; i += skip * 2) {
             context[countthread][0] = i;
             context[countthread][1] = i + skip;
-            // twowaymerge(&context);
-            pthread_create(&currtid, NULL, (void *)&twowaymerge,
-                           (void *)&context[countthread]);
-            waittid[countthread++] = currtid;
-            pthread_mutex_lock(&threadlock);
-            tid[tidindex++] = currtid;
-            pthread_mutex_unlock(&threadlock);
+            twowaymerge(&context);
+            // pthread_create(&currtid, NULL, (void *)&twowaymerge,
+                           // (void *)&context[countthread]);
+            // waittid[countthread++] = currtid;
+            // pthread_mutex_lock(&threadlock);
+            // tid[tidindex++] = currtid;
+            // pthread_mutex_unlock(&threadlock);
         }
-        for (i = 0; i < countthread; i++) {
-            pthread_join(waittid[i], NULL);
-        }
-        countthread = 0;
+        // for (i = 0; i < countthread; i++) {
+            // pthread_join(waittid[i], NULL);
+        // }
+        // countthread = 0;
         skip *= 2;
     }
 }
