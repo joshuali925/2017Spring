@@ -11,11 +11,11 @@ pthread_mutex_t threadlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t datalock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t pathlock = PTHREAD_MUTEX_INITIALIZER;
 int tidindex = 0;
-pthread_t tid[100000];
+pthread_t tid[10000];
 char ****alldata, *column, coltosort[50], outname[500], coltype;
 int tosort, linelen[10000], collen = 28;
 int filecounter = 0;
-char paths[100][300];
+char paths[1000][300];
 int pathcounter = 0;
 void sig_handler(int signo)
 {
@@ -39,11 +39,10 @@ void *traversedir(void *oripath)
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
         pthread_mutex_lock(&pathlock);
-        localcounter = pathcounter % 100;
+        localcounter = pathcounter % 1000;
         pathcounter++;
         pthread_mutex_unlock(&pathlock);
         sprintf(paths[localcounter], "%s/%s", path, entry->d_name);
-        // printf("%s\n",entry->d_name);
         if (entry->d_type == DT_DIR) {
             pthread_create(&currtid, NULL, (void *)&traversedir,
                            (void *)&paths[localcounter]);
