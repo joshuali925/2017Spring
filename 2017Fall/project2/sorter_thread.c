@@ -4,14 +4,14 @@
 #include <errno.h>
 /*
 for i in {0000..1024}; do cp m.csv m--$i.csv; done
-gcc -g -o sorter_thread sorter_thread.c -pthread && ./sorter_thread
+gcc -g -o sorter_thread sorter_thread.c -pthread && time ./sorter_thread -c director_name
 gcc sorter_thread.c -o sorter_thread -pthread && valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./sorter_thread
 */
 pthread_mutex_t threadlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t datalock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t pathlock = PTHREAD_MUTEX_INITIALIZER;
 int tidindex = 0;
-pthread_t tid[10000];
+pthread_t *tid;
 char ****alldata, *column, coltosort[50], outname[500], coltype;
 int tosort, linelen[10000], collen = 28;
 int filecounter = 0;
@@ -27,8 +27,8 @@ void *traversedir(void *oripath)
     char *path = oripath;
     DIR *dp = opendir(path);
     pthread_t currtid;
-    pthread_t waittid[10000];
-    int countthread = 0, i, localcounter = 0, chunk = 512, joined = 0;
+    pthread_t waittid[600];
+    int countthread = 0, i, localcounter = 0, joined = 0;
     struct dirent *entry;
 
     if (dp == NULL) {
@@ -38,10 +38,12 @@ void *traversedir(void *oripath)
     while (entry = readdir(dp)) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
+        /* ================================================================== */
         pthread_mutex_lock(&pathlock);
-        localcounter = pathcounter % 1000;
-        pathcounter++;
+        // pathcounter = pathcounter + 1 == 1000 ? 0 : pathcounter + 1;
+        localcounter = pathcounter++ % 1000;
         pthread_mutex_unlock(&pathlock);
+        /* ================================================================== */
         sprintf(paths[localcounter], "%s/%s", path, entry->d_name);
         if (entry->d_type == DT_DIR) {
             pthread_create(&currtid, NULL, (void *)&traversedir,
@@ -58,16 +60,14 @@ void *traversedir(void *oripath)
         pthread_mutex_lock(&threadlock);
         tid[tidindex++] = currtid;
         pthread_mutex_unlock(&threadlock);
-        // pthread_join(currtid, NULL);
-        if (countthread == chunk) {
-            for (i = joined; i < countthread; i++) {
+        if (countthread == 512) {
+            for (i = 0; i < countthread; i++) {
                 pthread_join(waittid[i], NULL);
             }
-            joined = countthread;
-            chunk += 512;
+            countthread = 0;
         }
     }
-    for (i = joined; i < countthread; i++) {
+    for (i = 0; i < countthread; i++) {
         pthread_join(waittid[i], NULL);
     }
     closedir(dp);
@@ -105,6 +105,8 @@ int main(int argc, char **argv)
     char path[500] = ".", outpath[500] = ".";
     int c = 1, i, t;
 
+    tid = (pthread_t *) malloc(sizeof(pthread_t) * 100000);
+
     // signal(SIGSEGV, sig_handler);
     alldata = (char ****)malloc(sizeof(char ***) * 10000);
     if (argc < 3)
@@ -124,32 +126,37 @@ int main(int argc, char **argv)
     struct timeval t0, t1;
     long msec;
 
-    // gettimeofday(&t0, 0);
+    gettimeofday(&t0, 0);
     traversedir(path);
-    // gettimeofday(&t1, 0);
-    // msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
-    // printf("\nread/sort used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
-    // gettimeofday(&t0, 0);
-    kwaymerge();
-    // gettimeofday(&t1, 0);
-    // msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
-    // printf("merging used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
-    // gettimeofday(&t0, 0);
+    gettimeofday(&t1, 0);
+    msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
+    printf("\nread/sort used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
+    gettimeofday(&t0, 0);
+    if (linelen[0] > 10000) {
+        kwaymergeparallel();
+    } else {
+        kwaymerge();
+    }
+    gettimeofday(&t1, 0);
+    msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
+    printf("merging used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
+    gettimeofday(&t0, 0);
     outputfile();
-    // gettimeofday(&t1, 0);
-    // msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
-    // printf("output used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
-    // printf("total \t\t%d lines\n", linelen[0]);
-    // printf("total \t\t%d files\n\n\n", filecounter);
+    gettimeofday(&t1, 0);
+    msec = (t1.tv_sec - t0.tv_sec) * 1000000 + t1.tv_usec - t0.tv_usec;
+    printf("output used\t%d.%d sec\n", msec / 1000000, msec % 1000000);
+    printf("total \t\t%d lines\n", linelen[0]);
+    printf("total \t\t%d files\n\n\n", filecounter);
     /* ================================================================== */
     pthread_mutex_destroy(&threadlock);
     pthread_mutex_destroy(&datalock);
     pthread_mutex_destroy(&pathlock);
     printf("Initial PID: %d\n", getpid());
     for (i = 0; i < tidindex - 1; i++) {
-        printf("%u,", tid[i]);
+        // printf("%u,", tid[i]);
     }
     printf("%u\nTotal number of threads: %d\n", tid[i], tidindex + 1);
+    free(tid);
     return 0;
 }
 
@@ -186,30 +193,43 @@ void *twowaymerge(void *context)
 
 void kwaymerge()
 {
+    int skip = 1, i;
+    int context[1][2];
+
+    while (skip < filecounter) {
+        for (i = 0; i < filecounter - skip; i += skip * 2) {
+            context[0][0] = i;
+            context[0][1] = i + skip;
+            twowaymerge(&context);
+        }
+        skip *= 2;
+    }
+}
+void kwaymergeparallel()
+{
     int skip = 1, i, countthread = 0;
     pthread_t currtid;
-    // pthread_t waittid[3000];
-    // int context[3000][2];
-    int context[1][2];
+    pthread_t *waittid = (pthread_t *) malloc(sizeof(pthread_t) * 30000);
+    int context[30000][2];
 
     while (skip < filecounter) {
         for (i = 0; i < filecounter - skip; i += skip * 2) {
             context[countthread][0] = i;
             context[countthread][1] = i + skip;
-            twowaymerge(&context);
-            // pthread_create(&currtid, NULL, (void *)&twowaymerge,
-                           // (void *)&context[countthread]);
-            // waittid[countthread++] = currtid;
-            // pthread_mutex_lock(&threadlock);
-            // tid[tidindex++] = currtid;
-            // pthread_mutex_unlock(&threadlock);
+            pthread_create(&currtid, NULL, (void *)&twowaymerge,
+                           (void *)&context[countthread]);
+            waittid[countthread++] = currtid;
+            pthread_mutex_lock(&threadlock);
+            tid[tidindex++] = currtid;
+            pthread_mutex_unlock(&threadlock);
         }
-        // for (i = 0; i < countthread; i++) {
-            // pthread_join(waittid[i], NULL);
-        // }
-        // countthread = 0;
+        for (i = 0; i < countthread; i++) {
+            pthread_join(waittid[i], NULL);
+        }
+        countthread = 0;
         skip *= 2;
     }
+    free(waittid);
 }
 char ***readdata(FILE * fp, int localcounter)
 {
