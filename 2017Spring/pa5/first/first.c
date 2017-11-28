@@ -89,7 +89,7 @@ int and(char *p)
     int n1, n2;
 
     if (*p < 'A')               //number
-        n1 = *p - '0e';
+        n1 = *p - '0';
     else                        //variable
         n1 = getValue(*p);
     if (*(p + 2) < 'A')         //number
