@@ -35,15 +35,15 @@ void *receive(void *args)
         return NULL;
     } else if (*recv_buf == '<') {      // merge
         // jointhreads();
-		sleep(1);
-		printf("going to merge %d files, line = %d\n", filecounter, linelen[0]);
+        sleep(1);
+        printf("going to merge %d files, line = %d\n", filecounter, linelen[0]);
         // int i;
 
         // for (i = 0; i < linelen[0]; i++) {
-            // printf("%d-th line: %s\n", i, alldata[0][i][tosort]);
+        // printf("%d-th line: %s\n", i, alldata[0][i][tosort]);
         // }
         kwaymerge();
-		printf("finished merging, going to send\n");
+        printf("finished merging, going to send\n");
         senddata(client_socket);
         return NULL;
     }
@@ -89,7 +89,7 @@ void *receive(void *args)
 }
 char ***readdata(char *file, int localcounter)
 {
-    int i, lineindex = 0, colindex = 0, lastletterindex, maxlen = 10;
+    int i, lineindex = 0, colindex = 0, lastletterindex, maxlen = 3000;
     char ***table = (char ***)malloc(sizeof(char **) * maxlen);
     int filelength = strlen(file), cindex = 419;        // skip column titles
     char c, *buffer = (char *)malloc(sizeof(char) * 10000);;
@@ -104,14 +104,14 @@ char ***readdata(char *file, int localcounter)
                 do {
                     c = file[cindex++];
                     buffer[i++] = c;
-                } while (c != '"');
+                } while (cindex < filelength && c != '"');
                 buffer[i - 1] = '\0';
             }
             /* ================================================================== */
-            while (c == ' ')    // process trailing space
+            while (cindex < filelength && c == ' ')    // process trailing space
                 c = file[cindex++];
             lastletterindex = -1;
-            while (c != ',' && c != '\n' && c != EOF) { // read a column
+            while (cindex < filelength && c != ',' && c != '\n' && c != EOF) { // read a column
                 if (c != ' ')
                     lastletterindex = i;
                 buffer[i++] = c;
@@ -130,7 +130,10 @@ char ***readdata(char *file, int localcounter)
         }
         lineindex++;
     } while (cindex < filelength);
-    linelen[localcounter] = lineindex;
+	/* ================================================================== */
+    linelen[localcounter] = lineindex; // large
+    // linelen[localcounter] = lineindex - 1; // small
+	/* ================================================================== */
     // free(table[lineindex - 1][0]);      // free column 0 in extra line
     // free(table[lineindex - 1]); // free extra line
     free(buffer);
@@ -138,7 +141,7 @@ char ***readdata(char *file, int localcounter)
 }
 void senddata(int client_socket)
 {
-    char *file = (char *)malloc(sizeof(char) * allfilelen);
+    char *file = (char *)malloc(sizeof(char) * allfilelen * 2);
     int i, t;
 
     *file = '\0';
@@ -149,6 +152,9 @@ void senddata(int client_socket)
                 strcat(file, alldata[0][i][t]);
                 strcat(file, "\",");
             } else {
+                if (t == tosort) {
+                    printf("%d: %s\n", i, alldata[0][i][t]);
+                }
                 strcat(file, alldata[0][i][t]);
                 strcat(file, ",");
             }
@@ -167,19 +173,31 @@ void senddata(int client_socket)
     }
     free(alldata[0]);
     free(alldata);
+    // printf("tosort = %d\n", tosort);
+    printf("going to send: %s\n", file);
     /* ================================================================== */
     char length[80];
 
+    printf("allfilelen = %d\n", allfilelen);
+    allfilelen = strlen(file);
+    printf("strlen = %d\n", allfilelen);
     sprintf(length, "%d", allfilelen);
     write(client_socket, length, sizeof(length));
     // make sure client received length
     read(client_socket, length, sizeof(length));
-    int remain = allfilelen, sent = 0;
-
-    while (remain > 0 && (sent = write(client_socket, file, min(remain, BUFSIZ))) > 0) {
-        remain -= sent;
-        // printf("sent = %d\tremain = %d\n", sent, remain);
-    }
+    /* ================================================================== */
+    // int remain = allfilelen, sent = 0;
+    // while (remain > 0 && (sent = write(client_socket, file, min(remain, BUFSIZ))) > 0) {
+    // remain -= sent;
+    // printf("sent = %d\tremain = %d\n", sent, remain);
+    // }
+    /* ================================================================== */
+    // for (i = 0; i < allfilelen; i++) {
+    // if (file[i] < ' ' || file[i] > '~') {
+    // file[i] = '<';
+    // }
+    // }
+    send(client_socket, file, allfilelen, 0);
     free(file);
     printf("[s] merged sent, closed client %d\n", client_socket);
     close(client_socket);
