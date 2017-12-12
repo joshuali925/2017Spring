@@ -1,8 +1,9 @@
 #include "sorter_server.h"
 pthread_mutex_t threadlock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t socketlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t datalock = PTHREAD_MUTEX_INITIALIZER;
 int port;
-int socketfds[50000], sockcounter;
+int *socketfds, sockcounter;
 char ****alldata, coltype;
 int tosort, linelen[10000], collen = 28;
 int filecounter = 0, allfilelen = 0;
@@ -10,12 +11,14 @@ pthread_t tids[50];
 int tidcounter = 0;
 void jointhreads()
 {
+    pthread_mutex_lock(&threadlock);
     int i;
 
     for (i = 0; i < tidcounter; i++) {
         pthread_join(tids[i], NULL);
     }
     tidcounter = 0;
+    pthread_mutex_unlock(&threadlock);
 }
 void *receive(void *args)
 {
@@ -27,24 +30,24 @@ void *receive(void *args)
     recv(client_socket, recv_buf, BUFSIZ, 0);
     /* ================================================================== */
     // read instruction
+    if (*recv_buf == '<') {     // merge
+        jointhreads();
+        printf("going to merge %d files, line = %d\n", filecounter, linelen[0]);
+        kwaymerge();
+        printf("finished merging, going to send\n");
+        senddata(client_socket);
+        return NULL;
+    }
+    pthread_mutex_lock(&threadlock);
+    int localcounter = tidcounter++;
+
+    pthread_mutex_unlock(&threadlock);
+    tids[localcounter] = pthread_self();
     if (*recv_buf == '>') {     // get col info
         coltype = recv_buf[1];
         tosort = recv_buf[2];
         printf("[s] col info received, closed client %d\n", client_socket);
         close(client_socket);
-        return NULL;
-    } else if (*recv_buf == '<') {      // merge
-        // jointhreads();
-        sleep(1);
-        printf("going to merge %d files, line = %d\n", filecounter, linelen[0]);
-        // int i;
-
-        // for (i = 0; i < linelen[0]; i++) {
-        // printf("%d-th line: %s\n", i, alldata[0][i][tosort]);
-        // }
-        kwaymerge();
-        printf("finished merging, going to send\n");
-        senddata(client_socket);
         return NULL;
     }
     /* ================================================================== */
@@ -62,7 +65,8 @@ void *receive(void *args)
     ssize_t len;
 
     while (remain > 0
-           && (len = recv(client_socket, recv_buf, min(remain, BUFSIZ), 0)) > 0) {
+           && (len =
+               recv(client_socket, recv_buf, min(remain, BUFSIZ), 0)) > 0) {
         strncat(file, recv_buf, min(remain, len));
         remain -= len;
         // printf("remain = %d\tread = %d\n", remain, len);
@@ -76,8 +80,7 @@ void *receive(void *args)
     /* ================================================================== */
     // parse and sort
     pthread_mutex_lock(&datalock);
-    int localcounter = filecounter++;
-
+    localcounter = filecounter++;
     pthread_mutex_unlock(&datalock);
     char ***table = readdata(file, localcounter);
 
@@ -92,7 +95,8 @@ char ***readdata(char *file, int localcounter)
     int i, lineindex = 0, colindex = 0, lastletterindex, maxlen = 3000;
     char ***table = (char ***)malloc(sizeof(char **) * maxlen);
     int filelength = strlen(file), cindex = 419;        // skip column titles
-    char c, *buffer = (char *)malloc(sizeof(char) * 10000);;
+    char c, *buffer = (char *)malloc(sizeof(char) * 10000);
+
     do {
         table[lineindex] = (char **)malloc(sizeof(char *) * collen);
         colindex = 0;
@@ -108,10 +112,10 @@ char ***readdata(char *file, int localcounter)
                 buffer[i - 1] = '\0';
             }
             /* ================================================================== */
-            while (cindex < filelength && c == ' ')    // process trailing space
+            while (cindex < filelength && c == ' ')     // process trailing space
                 c = file[cindex++];
             lastletterindex = -1;
-            while (cindex < filelength && c != ',' && c != '\n' && c != EOF) { // read a column
+            while (cindex < filelength && c != ',' && c != '\n' && c != EOF) {  // read a column
                 if (c != ' ')
                     lastletterindex = i;
                 buffer[i++] = c;
@@ -123,17 +127,20 @@ char ***readdata(char *file, int localcounter)
                 (char *)malloc(sizeof(char) * strlen(buffer) + 1);
             strcpy(table[lineindex][colindex], buffer);
             colindex++;
-        } while (c != '\n' && c != '\r');
+        } while (colindex < 29 && c != '\n' && c != '\r');
         if (lineindex == maxlen - 1) {  // need to allocate more space
             maxlen += maxlen;
             table = (char ***)realloc(table, maxlen * sizeof(char **));
         }
         lineindex++;
     } while (cindex < filelength);
-	/* ================================================================== */
-    linelen[localcounter] = lineindex; // large
-    // linelen[localcounter] = lineindex - 1; // small
-	/* ================================================================== */
+    /* ================================================================== */
+    if (colindex == 29) {       // a weird testcase leads to infinite columns
+        linelen[localcounter] = lineindex - 1;  // remove last line
+    } else {
+        linelen[localcounter] = lineindex;
+    }
+    /* ================================================================== */
     // free(table[lineindex - 1][0]);      // free column 0 in extra line
     // free(table[lineindex - 1]); // free extra line
     free(buffer);
@@ -152,9 +159,9 @@ void senddata(int client_socket)
                 strcat(file, alldata[0][i][t]);
                 strcat(file, "\",");
             } else {
-                if (t == tosort) {
-                    printf("%d: %s\n", i, alldata[0][i][t]);
-                }
+                // if (t == tosort) {
+                // printf("%d: %s\n", i, alldata[0][i][t]);
+                // }
                 strcat(file, alldata[0][i][t]);
                 strcat(file, ",");
             }
@@ -172,7 +179,7 @@ void senddata(int client_socket)
         free(alldata[0][i]);
     }
     free(alldata[0]);
-    free(alldata);
+    // free(alldata); // should not free because only malloced once
     // printf("tosort = %d\n", tosort);
     printf("going to send: %s\n", file);
     /* ================================================================== */
@@ -191,24 +198,20 @@ void senddata(int client_socket)
     // remain -= sent;
     // printf("sent = %d\tremain = %d\n", sent, remain);
     // }
-    /* ================================================================== */
-    // for (i = 0; i < allfilelen; i++) {
-    // if (file[i] < ' ' || file[i] > '~') {
-    // file[i] = '<';
-    // }
-    // }
     send(client_socket, file, allfilelen, 0);
+    /* ================================================================== */
     free(file);
     printf("[s] merged sent, closed client %d\n", client_socket);
     close(client_socket);
     /* ================================================================== */
     filecounter = 0;
     allfilelen = 0;
-    sockcounter = 0;
+    // sockcounter = 0;
 }
 int main(int argc, char **argv)
 {
     alldata = (char ****)malloc(sizeof(char ***) * 10000);
+    socketfds = (int *)malloc(sizeof(int) * 50000);
     int c = 1;
 
     if (argc < 3) {
@@ -223,6 +226,9 @@ int main(int argc, char **argv)
     /* ================================================================== */
     int server_sock, client_sock;
     struct sockaddr_in address;
+    struct sockaddr_in client_address;
+    int client_len = sizeof(client_address);
+    char ipaddress[100];
 
     if ((server_sock = socket(AF_INET, SOCK_STREAM, 0)) <= 0)   // -1 if failed
     {
@@ -244,22 +250,31 @@ int main(int argc, char **argv)
     }
     printf("Waiting for connections...\n");
     /* ================================================================== */
+	printf("Received connections from: ");
     while (1) {
-        if ((client_sock = accept(server_sock, NULL, NULL)) < 0) {
+        if ((client_sock =
+             accept(server_sock, (struct sockaddr *)&client_address,
+                    &client_len)) < 0) {
             perror("accept");
             close(server_sock);
             exit(EXIT_FAILURE);
         }
+        inet_ntop(AF_INET, &client_address.sin_addr.s_addr, ipaddress,
+                  sizeof(ipaddress));
+        // printf("%s,", ipaddress);
+        fflush(stdout);
         printf("[+] Connect to client %d\n", client_sock);
-        pthread_mutex_lock(&threadlock);
+        pthread_mutex_lock(&socketlock);
         int localcounter = sockcounter++;
 
-        pthread_mutex_unlock(&threadlock);
+        pthread_mutex_unlock(&socketlock);
         socketfds[localcounter] = client_sock;
-        printf("tidcounter = %d\tsockfdindex = %d\n", tidcounter, localcounter);
-        pthread_create(&tids[tidcounter++], NULL, (void *)&receive,
+        pthread_t tid;
+
+        pthread_create(&tid, NULL, (void *)&receive,
                        (void *)&socketfds[localcounter]);
-        if (tidcounter >= 50) {
+        // pthread_join(tid, NULL);
+        if (tidcounter > 50) {
             jointhreads();
         }
     }
@@ -292,7 +307,9 @@ void *twowaymerge(void *context)
         if (coltype == 's')
             comp = strcmp(alldata[file1][i][tosort], alldata[file2][j][tosort]);
         else
-            comp = atof(alldata[file1][i][tosort]) - atof(alldata[file2][j][tosort]);
+            comp =
+                atof(alldata[file1][i][tosort]) -
+                atof(alldata[file2][j][tosort]);
         if (comp <= 0)
             newfile[k++] = alldata[file1][i++];
         else
