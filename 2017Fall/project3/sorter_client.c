@@ -6,6 +6,8 @@ char paths[1000][300];
 int pathcounter = 0;
 char domain[100];
 int port;
+int maxsocket = 1;
+sem_t socketsem;
 void *traversedir(void *oripath)
 {
     char *path = oripath;
@@ -55,6 +57,7 @@ void *traversedir(void *oripath)
 
 int createsocket()
 {
+    sem_wait(&socketsem);
     int sockfd;
     struct sockaddr_in address;
     struct hostent *server;
@@ -75,10 +78,15 @@ int createsocket()
     }
     if (connect(sockfd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("connect");
-        close(sockfd);
+        releasesocket(sockfd);
         exit(EXIT_FAILURE);
     }
     return sockfd;
+}
+void releasesocket(int sockfd)
+{
+    close(sockfd);
+    sem_post(&socketsem);
 }
 void *transfer(void *rawpath)
 {
@@ -86,18 +94,18 @@ void *transfer(void *rawpath)
 
     /* ================================================================== */
     // check valid csv
-    // FILE *fp = fopen(filename, "r");
-    // char line[500];
+    FILE *fp = fopen(filename, "r");
+    char line[500];
 
-    // fgets(line, 500, fp);
-    // fclose(fp);
-    // int i, commas = 0;
+    fgets(line, 500, fp);
+    fclose(fp);
+    int i, commas = 0;
 
-    // for (i = 0; i < strlen(line); i++)
-        // if (line[i] == ',')
-            // commas++;
-    // if (commas != 27)
-        // return NULL;
+    for (i = 0; i < strlen(line); i++)
+        if (line[i] == ',')
+            commas++;
+    if (commas != 27)
+        return NULL;
     /* ================================================================== */
     // create socket
     int sockfd = createsocket();
@@ -107,18 +115,14 @@ void *transfer(void *rawpath)
     int filefd = open(filename, O_RDONLY);
     struct stat stat_buf;
 
-
     fstat(filefd, &stat_buf);
     char filelength[255];
 
     sprintf(filelength, "%d", stat_buf.st_size);
     send(sockfd, filelength, sizeof(filelength), 0);
-
     printf("writing # bytes = %s\n", filelength);
-
     int remain = stat_buf.st_size, sent;
     off_t offset = 0;
-
     char buffer[255];
 
     read(sockfd, buffer, sizeof(buffer));
@@ -131,7 +135,7 @@ void *transfer(void *rawpath)
     printf("out\n");
     read(sockfd, buffer, sizeof(buffer));
     printf("from server: %s\n", buffer);
-    close(sockfd);
+    releasesocket(sockfd);
     close(filefd);
     return NULL;
 }
@@ -146,8 +150,9 @@ void sendcolinfo()
     protocol[2] = tosort;
     protocol[3] = '\0';
     send(sockfd, protocol, sizeof(protocol), 0);
-	close(sockfd);
+    releasesocket(sockfd);
 }
+
 void mergerequest()
 {
     int sockfd = createsocket();
@@ -156,35 +161,32 @@ void mergerequest()
     protocol[0] = '<';
     protocol[1] = '\0';
     send(sockfd, protocol, sizeof(protocol), 0);
-	
-	char buffer[10000] = "";
-	recv(sockfd, buffer, sizeof(buffer), 0);
-	// tell server received length
-	send(sockfd, protocol, sizeof(protocol), 0);
-	
-	int remain = atoi(buffer);
-	char *file = (char *)malloc(remain);
-	*file = '\0';
-	ssize_t len;
-	
-	printf("got all files: length = %d\n", remain);
-	while (remain > 0
-           && (len = recv(sockfd, buffer, min(remain, BUFSIZ), 0)) > 0) {
+    char buffer[10000] = "";
+
+    recv(sockfd, buffer, sizeof(buffer), 0);
+    // tell server received length
+    send(sockfd, protocol, sizeof(protocol), 0);
+    int remain = atoi(buffer);
+    char *file = (char *)malloc(remain);
+
+    *file = '\0';
+    ssize_t len;
+
+    printf("got all files: length = %d\n", remain);
+    while (remain > 0 && (len = recv(sockfd, buffer, min(remain, BUFSIZ), 0)) > 0) {
         strncat(file, buffer, min(remain, len));
         remain -= len;
         // printf("remain = %d\tread = %d\n", remain, len);
     }
-	printf("%s\n", file);
-	printf("got all files: length = %d\n", strlen(file));
-	
-	
-	close(sockfd);
-	
-	FILE * outfp = fopen(outname, "w");
-	fprintf(outfp, "color,director_name,num_critic_for_reviews,duration,director_facebook_likes,actor_3_facebook_likes,actor_2_name,actor_1_facebook_likes,gross,genres,actor_1_name,movie_title,num_voted_users,cast_total_facebook_likes,actor_3_name,facenumber_in_poster,plot_keywords,movie_imdb_link,num_user_for_reviews,language,country,content_rating,budget,title_year,actor_2_facebook_likes,imdb_score,aspect_ratio,movie_facebook_likes\n%s", file);
-	fclose(outfp);
-	
-	
+    printf("%s\n", file);
+    printf("got all files: length = %d\n", strlen(file));
+    releasesocket(sockfd);
+    FILE *outfp = fopen(outname, "w");
+
+    fprintf(outfp,
+            "color,director_name,num_critic_for_reviews,duration,director_facebook_likes,actor_3_facebook_likes,actor_2_name,actor_1_facebook_likes,gross,genres,actor_1_name,movie_title,num_voted_users,cast_total_facebook_likes,actor_3_name,facenumber_in_poster,plot_keywords,movie_imdb_link,num_user_for_reviews,language,country,content_rating,budget,title_year,actor_2_facebook_likes,imdb_score,aspect_ratio,movie_facebook_likes\n%s",
+            file);
+    fclose(outfp);
 }
 int main(int argc, char **argv)
 {
@@ -207,15 +209,18 @@ int main(int argc, char **argv)
             strcpy(domain, argv[c + 1]);
         else if (*(argv[c] + 1) == 'p')
             port = atoi(argv[c + 1]);
+        else if (*(argv[c] + 1) == 's')
+            maxsocket = atoi(argv[c + 1]);
         c += 2;
     }
+    sem_init(&socketsem, 0, maxsocket);
     getcolinfo();
-	sendcolinfo();
+    sendcolinfo();
     sprintf(outname, "%s/AllFiles-sorted-%s.csv", outpath, coltosort);
     /* ================================================================== */
     traversedir(path);
-	// send merge request
-	mergerequest();
+    // send merge request
+    mergerequest();
     /* ================================================================== */
     pthread_mutex_destroy(&pathlock);
     return 0;
