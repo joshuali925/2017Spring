@@ -18,7 +18,7 @@ void *traversedir(void *oripath)
     struct dirent *entry;
 
     if (dp == NULL) {
-        printf("failed to read dir %s: %s\n", path, strerror(errno));
+        fprintf(stderr, "failed to read dir %s: %s\n", path, strerror(errno));
         return NULL;
     }
     while (entry = readdir(dp)) {
@@ -36,7 +36,8 @@ void *traversedir(void *oripath)
         } else {
             if (strlen(paths[localcounter]) < 4
                 || strcmp(paths[localcounter] + strlen(paths[localcounter]) - 4,
-                          ".csv") != 0 || strstr(paths[localcounter], "-sorted-"))
+                          ".csv") != 0
+                || strstr(paths[localcounter], "-sorted-"))
                 continue;
             pthread_create(&currtid, NULL, (void *)&transfer,
                            (void *)&paths[localcounter]);
@@ -70,7 +71,8 @@ int createsocket()
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
-    bcopy((char *)server->h_addr, (char *)&address.sin_addr.s_addr, server->h_length);
+    bcopy((char *)server->h_addr, (char *)&address.sin_addr.s_addr,
+          server->h_length);
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
         perror("socket");
@@ -120,21 +122,22 @@ void *transfer(void *rawpath)
 
     sprintf(filelength, "%d", stat_buf.st_size);
     send(sockfd, filelength, sizeof(filelength), 0);
-    printf("writing # bytes = %s\n", filelength);
+  // printf("writing # bytes = %s\n", filelength);
     int remain = stat_buf.st_size, sent;
     off_t offset = 0;
     char buffer[255];
 
     read(sockfd, buffer, sizeof(buffer));
-    printf("%s\n", buffer);
+  // printf("%s\n", buffer);
     while (remain > 0
-           && (sent = sendfile(sockfd, filefd, &offset, min(remain, BUFSIZ))) > 0) {
+           && (sent =
+               sendfile(sockfd, filefd, &offset, min(remain, BUFSIZ))) > 0) {
         remain -= sent;
-        printf("sent = %d\tremain = %d\n", sent, remain);
+      // printf("sent = %d\tremain = %d\n", sent, remain);
     }
-    printf("out\n");
+  // printf("out\n");
     read(sockfd, buffer, sizeof(buffer));
-    printf("from server: %s\n", buffer);
+  // printf("from server: %s\n", buffer);
     releasesocket(sockfd);
     close(filefd);
     return NULL;
@@ -172,14 +175,15 @@ void mergerequest()
     *file = '\0';
     ssize_t len;
 
-    printf("got all files: length = %d\n", remain);
-    while (remain > 0 && (len = recv(sockfd, buffer, min(remain, BUFSIZ), 0)) > 0) {
+  // printf("got all files: length = %d\n", remain);
+    while (remain > 0
+           && (len = recv(sockfd, buffer, min(remain, BUFSIZ), 0)) > 0) {
         strncat(file, buffer, min(remain, len));
         remain -= len;
         // printf("remain = %d\tread = %d\n", remain, len);
     }
-    printf("%s\n", file);
-    printf("got all files: length = %d\n", strlen(file));
+  // printf("%s\n", file);
+  // printf("got all files: length = %d\n", strlen(file));
     releasesocket(sockfd);
     FILE *outfp = fopen(outname, "w");
 
@@ -195,7 +199,9 @@ int main(int argc, char **argv)
     int c = 1;
 
     if (argc < 7) {
-        printf("need more arguments\n");
+        fprintf(stderr,
+                "usage %s -c <column to sort> -h <host> -p <port> -s <max num of socket> -d <search dir> -o <output dir>\n",
+                argv[0]);
         return 0;
     }
     while (c < argc - 1) {
