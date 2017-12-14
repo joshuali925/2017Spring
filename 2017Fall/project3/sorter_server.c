@@ -32,10 +32,12 @@ void *receive(void *args)
     // read instruction
     if (*recv_buf == '<') {     // merge
         jointhreads();
-        printf("going to merge %d files, line = %d\n", filecounter, linelen[0]);
+        // printf("going to merge %d files, line = %d\n", filecounter, linelen[0]);
+        pthread_mutex_lock(&datalock);
         kwaymerge();
-        printf("finished merging, going to send\n");
+        // printf("finished merging, going to send\n");
         senddata(client_socket);
+        pthread_mutex_unlock(&datalock);
         return NULL;
     }
     pthread_mutex_lock(&threadlock);
@@ -46,7 +48,7 @@ void *receive(void *args)
     if (*recv_buf == '>') {     // get col info
         coltype = recv_buf[1];
         tosort = recv_buf[2];
-        printf("[s] col info received, closed client %d\n", client_socket);
+        // printf("[s] col info received, closed client %d\n", client_socket);
         close(client_socket);
         return NULL;
     }
@@ -65,8 +67,7 @@ void *receive(void *args)
     ssize_t len;
 
     while (remain > 0
-           && (len =
-               recv(client_socket, recv_buf, min(remain, BUFSIZ), 0)) > 0) {
+           && (len = recv(client_socket, recv_buf, min(remain, BUFSIZ), 0)) > 0) {
         strncat(file, recv_buf, min(remain, len));
         remain -= len;
         // printf("remain = %d\tread = %d\n", remain, len);
@@ -75,7 +76,7 @@ void *receive(void *args)
     // printf("[r] String read:\n%s\n", file);
     // printf("filelength = %d\tstrlen = %d\n", filelength, strlen(file));
     write(client_socket, send_buf, sizeof(send_buf));
-    printf("[s] finished loading, closed client %d\n", client_socket);
+    // printf("[s] finished loading, closed client %d\n", client_socket);
     close(client_socket);
     /* ================================================================== */
     // parse and sort
@@ -148,32 +149,38 @@ char ***readdata(char *file, int localcounter)
 }
 void senddata(int client_socket)
 {
-    char *file = (char *)malloc(sizeof(char) * allfilelen * 2);
+	printf("\nsending %d chars\n", allfilelen);
+    char *file = (char *)malloc(sizeof(char) * allfilelen * 20);
     int i, t;
+	char quotes[] = "\"";
+	char quotesnewline[] = "\"\n";
+	char quotescomma[] = "\",";
+	char comma[] = ",";
+	char newline[] = "\n";
 
     *file = '\0';
     for (i = 0; i < linelen[0]; i++) {
         for (t = 0; t < 27; t++) {
             if (strchr(alldata[0][i][t], ',')) {
-                strcat(file, "\"");
+                strcat(file, quotes);
                 strcat(file, alldata[0][i][t]);
-                strcat(file, "\",");
+                strcat(file, quotescomma);
             } else {
                 // if (t == tosort) {
                 // printf("%d: %s\n", i, alldata[0][i][t]);
                 // }
                 strcat(file, alldata[0][i][t]);
-                strcat(file, ",");
+                strcat(file, comma);
             }
             free(alldata[0][i][t]);
         }
         if (strchr(alldata[0][i][t], ',')) {
-            strcat(file, "\"");
+            strcat(file, quotes);
             strcat(file, alldata[0][i][t]);
-            strcat(file, "\"\n");
+            strcat(file, quotesnewline);
         } else {
             strcat(file, alldata[0][i][t]);
-            strcat(file, "\n");
+            strcat(file, newline);
         }
         free(alldata[0][i][t]);
         free(alldata[0][i]);
@@ -181,13 +188,13 @@ void senddata(int client_socket)
     free(alldata[0]);
     // free(alldata); // should not free because only malloced once
     // printf("tosort = %d\n", tosort);
-    printf("going to send: %s\n", file);
+    // printf("going to send: %s\n", file);
     /* ================================================================== */
     char length[80];
 
-    printf("allfilelen = %d\n", allfilelen);
+    // printf("allfilelen = %d\n", allfilelen);
     allfilelen = strlen(file);
-    printf("strlen = %d\n", allfilelen);
+    // printf("strlen = %d\n", allfilelen);
     sprintf(length, "%d", allfilelen);
     write(client_socket, length, sizeof(length));
     // make sure client received length
@@ -201,11 +208,11 @@ void senddata(int client_socket)
     send(client_socket, file, allfilelen, 0);
     /* ================================================================== */
     free(file);
-    printf("[s] merged sent, closed client %d\n", client_socket);
+    // printf("[s] merged sent, closed client %d\n", client_socket);
     close(client_socket);
     /* ================================================================== */
     filecounter = 0;
-    allfilelen = 0;
+    // allfilelen = 0;
     // sockcounter = 0;
 }
 int main(int argc, char **argv)
@@ -215,7 +222,7 @@ int main(int argc, char **argv)
     int c = 1;
 
     if (argc < 3) {
-        printf("need more arguments\n");
+        fprintf(stderr, "usage %s -p <port>\n", argv[0]);
         return 0;
     }
     while (c < argc - 1) {
@@ -248,22 +255,20 @@ int main(int argc, char **argv)
         close(server_sock);
         exit(EXIT_FAILURE);
     }
-    printf("Waiting for connections...\n");
+    // printf("Waiting for connections...\n");
     /* ================================================================== */
-	printf("Received connections from: ");
+    printf("Received connections from: ");
     while (1) {
         if ((client_sock =
-             accept(server_sock, (struct sockaddr *)&client_address,
-                    &client_len)) < 0) {
+             accept(server_sock, (struct sockaddr *)&client_address, &client_len)) < 0) {
             perror("accept");
             close(server_sock);
             exit(EXIT_FAILURE);
         }
-        inet_ntop(AF_INET, &client_address.sin_addr.s_addr, ipaddress,
-                  sizeof(ipaddress));
-        // printf("%s,", ipaddress);
+        inet_ntop(AF_INET, &client_address.sin_addr.s_addr, ipaddress, sizeof(ipaddress));
+        printf("%s,", ipaddress);
         fflush(stdout);
-        printf("[+] Connect to client %d\n", client_sock);
+        // printf("[+] Connect to client %d\n", client_sock);
         pthread_mutex_lock(&socketlock);
         int localcounter = sockcounter++;
 
@@ -271,8 +276,7 @@ int main(int argc, char **argv)
         socketfds[localcounter] = client_sock;
         pthread_t tid;
 
-        pthread_create(&tid, NULL, (void *)&receive,
-                       (void *)&socketfds[localcounter]);
+        pthread_create(&tid, NULL, (void *)&receive, (void *)&socketfds[localcounter]);
         // pthread_join(tid, NULL);
         if (tidcounter > 50) {
             jointhreads();
@@ -307,9 +311,7 @@ void *twowaymerge(void *context)
         if (coltype == 's')
             comp = strcmp(alldata[file1][i][tosort], alldata[file2][j][tosort]);
         else
-            comp =
-                atof(alldata[file1][i][tosort]) -
-                atof(alldata[file2][j][tosort]);
+            comp = atof(alldata[file1][i][tosort]) - atof(alldata[file2][j][tosort]);
         if (comp <= 0)
             newfile[k++] = alldata[file1][i++];
         else
