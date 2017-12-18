@@ -10,6 +10,7 @@ void *traversedir(void *oripath);
 char ***readdata(FILE * fp, int filecounter);
 void *twowaymerge(void *context);
 void kwaymerge();
+void kwaymergeparallel();
 void outputcolumn(char **column, int collen);
 void outputfile();
 void getcolinfo();
