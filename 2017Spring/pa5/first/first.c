@@ -1,4 +1,6 @@
 #include"first.h"
+int inputNum, outputNum, inputs[26], outputs[26], tempVars[26];
+
 //========================================================================//
 void readFile(FILE * circFile, FILE * inputFile)
 {
@@ -18,17 +20,18 @@ void readFile(FILE * circFile, FILE * inputFile)
         fscanf(circFile, "%c ", &outputsVar[i]);
     }
     while (fscanf(inputFile, "%d ", &val) != EOF) {
-        circuit[toIndex(inputsVar[counter])] = val;
+        inputs[toIndex(inputsVar[counter])] = val;
         counter++;
         if (counter >= inputNum) {
             counter = 0;
             process(circFile);  //process a single line in inputFile
             for (i = 0; i < outputNum; i++) {
-                printf("%d ", circuit[toIndex(outputsVar[i])]);
+                printf("%d ", outputs[toIndex(outputsVar[i])]);
             }
             printf("\n");
             for (i = 0; i < 26; i++) {
-                circuit[i] = 0;
+                inputs[i] = 0;
+                outputs[i] = 0;
                 tempVars[i] = 0;
             }
         }
@@ -50,7 +53,7 @@ void process(FILE * circFile)
         strcpy(parameter, line + strlen(instr) + 1);    //parameter = the string after instr
         if (strcmp(instr, "DECODER") == 0) {
             decoder(parameter);
-            free(parameter);
+            // free(parameter);
             continue;
         }
         dest = line[strlen(line) - 1];  //dest = last character
@@ -67,10 +70,10 @@ void process(FILE * circFile)
         else if (strcmp(instr, "MULTIPLEXER") == 0)
             tempVars[toIndex(dest)] = multiplexer(parameter);
         if (dest < 'a') {       //not a temp, assign to outputs, restore temp
-            circuit[toIndex(dest)] = tempVars[toIndex(dest)];
+            outputs[toIndex(dest)] = tempVars[toIndex(dest)];
             tempVars[toIndex(dest)] = prev;
         }
-        free(parameter);
+        // free(parameter);
     }
     fsetpos(circFile, &position);
 }
@@ -82,7 +85,7 @@ int not(char *p)
         n = *p - '0';
     else                        //variable
         n = getValue(*p);
-    return 1 - n;
+    return n == 0 ? 1 : 0;
 }
 int and(char *p)
 {
@@ -96,7 +99,7 @@ int and(char *p)
         n2 = *(p + 2) - '0';
     else                        //variable
         n2 = getValue(*(p + 2));
-    return n1 * n2;
+    return n1 == 1 && n2 == 1;
 }
 int or(char *p)
 {
@@ -110,7 +113,7 @@ int or(char *p)
         n2 = *(p + 2) - '0';
     else                        //variable
         n2 = getValue(*(p + 2));
-    return (n1 + n2) > 0;
+    return !(n1 == 0 && n2 == 0);
 }
 int decoder(char *p)
 {
@@ -123,23 +126,20 @@ int decoder(char *p)
 
     for (i = 0; i < n; i++) {
         token = strtok(NULL, " ");
-        *(gray + i) = *token < 'A' ? *token : getValue(*token) + '0';
+        *(gray + i) = *token < 'A' ? *token : (char)getValue(*token) + '0';
+        *(gray + i + 1) = '\0';
     }
-    *(gray + i + 1) = '\0';
     for (i = 0; i < (int)pow(n, 2); i++) {
         token = strtok(NULL, " ");
         decOutputsVar[i] = *token;
-        if (*token < 'a')
-            circuit[toIndex(*token)] = 0;
-        else
-            tempVars[toIndex(*token)] = 0;
     }
     char ch = decOutputsVar[grayToIndex(gray)];
 
-    if (ch < 'a')
-        circuit[toIndex(ch)] = 1;
-    else
+    if (ch < 'a') {
+        outputs[toIndex(ch)] = 1;
+    } else {
         tempVars[toIndex(ch)] = 1;
+    }
     free(gray);
     return 0;
 }
@@ -158,9 +158,9 @@ int multiplexer(char *p)
     }
     for (i = 0; i < (int)(log(n) / log(2)); i++) {      //reading selectors
         token = strtok(NULL, " ");
-        *(gray + i) = *token < 'A' ? *token : getValue(*token) + '0';   //number : variable
+        *(gray + i) = *token < 'A' ? *token : (char)getValue(*token) + '0';     //number : variable
+        *(gray + i + 1) = '\0';
     }
-    *(gray + i + 1) = '\0';
     index = grayToIndex(gray);
     free(gray);
     return muxInputs[index];
@@ -171,7 +171,7 @@ int toIndex(char c)
 }
 int getValue(char c)
 {
-    return c < 'a' ? circuit[c - 'A'] : tempVars[c - 'a'];
+    return c < 'a' ? inputs[c - 'A'] : tempVars[c - 'a'];
 }
 int grayToIndex(char *gray)
 {
